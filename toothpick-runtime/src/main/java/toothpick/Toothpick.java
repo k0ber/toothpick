@@ -4,6 +4,7 @@ import toothpick.configuration.Configuration;
 import toothpick.configuration.ConfigurationHolder;
 
 import java.util.Collections;
+import java.util.List;
 import java.util.concurrent.ConcurrentHashMap;
 
 /**
@@ -22,6 +23,8 @@ public final class Toothpick {
   //its transformation
   private static final ConcurrentHashMap<Object, Scope> MAP_KEY_TO_SCOPE =
       new ConcurrentHashMap<>();
+  private static final ConcurrentHashMap<Object, List<ScopeCloseListener>> MAP_LISTENERS_TO_SCOPE_NAME =
+          new ConcurrentHashMap<>();
   private static Injector injector = new InjectorImpl();
 
   private Toothpick() {
@@ -96,6 +99,22 @@ public final class Toothpick {
     return scope;
   }
 
+  public static Scope doOnClose(Scope scope, ScopeCloseListener listener) {
+    if (listener == null) {
+      throw new IllegalArgumentException("null listener is not allowed.");
+    }
+
+    if (scope == null) {
+      throw new IllegalArgumentException("null scope is not allowed.");
+    }
+
+    List<ScopeCloseListener> listeners = MAP_LISTENERS_TO_SCOPE_NAME.get(scope.getName());
+    if (listeners != null) {
+      listeners.add(listener);
+    }
+    return scope;
+  }
+
   /**
    * Detach a scope from its parent, this will trigger the garbage collection of this scope and it's
    * sub-scopes
@@ -107,6 +126,8 @@ public final class Toothpick {
     //we remove the scope first, so that other threads don't see it, and see the next snapshot of the tree
     ScopeNode scope = (ScopeNode) MAP_KEY_TO_SCOPE.remove(name);
     if (scope != null) {
+      callAndRemoveCloseListeners(scope);
+
       ScopeNode parentScope = scope.getParentScope();
       if (parentScope != null) {
         parentScope.removeChild(scope);
@@ -162,6 +183,16 @@ public final class Toothpick {
     scope.close();
     for (ScopeNode childScope : scope.childrenScopes.values()) {
       removeScopeAndChildrenFromMap(childScope);
+    }
+  }
+
+  private static void callAndRemoveCloseListeners(Scope scope) {
+    List<ScopeCloseListener> closeListeners = MAP_LISTENERS_TO_SCOPE_NAME.get(scope.getName());
+    if (closeListeners != null) {
+      for (ScopeCloseListener closeListener : closeListeners) {
+        closeListener.onClose();
+      }
+      MAP_LISTENERS_TO_SCOPE_NAME.remove(scope.getName());
     }
   }
 
